@@ -23,6 +23,26 @@ list. The row tools work with whatever column headers your sheet has.
 Every edit first copies the workbook into `.<filename>.backups/` next to it
 (last 10 kept) and then replaces the file atomically.
 
+## Quick install (Cloudflare Tunnel)
+
+On the server, as a user with sudo:
+
+```bash
+git clone -b ccr-47e5a557-3sk4af https://github.com/ammamin/git_test.git /opt/excel-mcp-src
+cd /opt/excel-mcp-src/excel-mcp
+sudo ./setup.sh
+```
+
+`setup.sh` installs the dependencies, asks you for a sign-in password, runs the
+server as a systemd service, creates a Cloudflare Tunnel and DNS record for
+`todo.basehomemedia.stream`, and checks the result from the outside. The one manual
+step is a Cloudflare login link it prints (once). It does not open any router
+ports and does not touch an existing `cloudflared` setup. Override defaults with
+e.g. `sudo DOMAIN=other.example.com EXCEL_FILE=/path/file.xlsx ./setup.sh`.
+
+Then skip to [Add it to Claude](#4-add-it-to-claude). The manual steps below are
+the same thing done by hand.
+
 ## 1. Install on the server
 
 ```bash
