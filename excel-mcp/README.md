@@ -1,13 +1,17 @@
 # Excel MCP server
 
 A small remote MCP server that lets Claude (web, desktop and the Android/iOS apps)
-read and edit one Excel workbook that lives on your server.
+read and edit one Excel workbook that lives on your server - for example a todo
+list. The row tools work with whatever column headers your sheet has.
 
 ## Tools
 
 | Tool | What it does |
 | --- | --- |
 | `workbook_info` | Sheets, used ranges and header rows |
+| `list_rows` | List rows as records by column header, with filters (e.g. `Status` = `Open`) |
+| `add_row` | Add a row by column header, e.g. `{"Task": "Buy milk", "Status": "Open"}` |
+| `update_row` | Change columns of one row, e.g. mark a todo done |
 | `read_range` | Read a range (values, or formulas with `show_formulas`) |
 | `search` | Find cells containing a text |
 | `write_cells` | Set individual cells, e.g. `{"B2": 42, "C2": "=B2*2"}` |
@@ -81,7 +85,7 @@ pointing at `http://127.0.0.1:8000` works too.
 2. Name it (e.g. "Excel") and paste `https://excel.example.com/<MCP_SECRET>/mcp`.
 3. Leave the OAuth fields empty and save.
 4. In the Android app, open a chat, enable the connector from the tools menu and ask
-   e.g. "What sheets are in my workbook?".
+   e.g. "What's still open on my todo list?" or "Add 'buy milk' and mark the rent one done".
 
 Connectors are tied to your account, so once added on the web it shows up in the
 mobile app.

@@ -300,6 +300,119 @@ def delete_rows(sheet: str, first_row: int, count: int = 1) -> str:
     return f"Deleted {count} row(s) starting at row {first_row} on {sheet!r}."
 
 
+def _headers(ws, header_row: int) -> dict[str, int]:
+    """Map lower-cased header text to column index."""
+    headers = {}
+    for cell in ws[header_row]:
+        if cell.value is not None and str(cell.value).strip():
+            headers.setdefault(str(cell.value).strip().lower(), cell.column)
+    if not headers:
+        raise ToolError(f"Row {header_row} of {ws.title!r} has no headers")
+    return headers
+
+
+def _columns_for(ws, header_row: int, values: dict[str, Scalar]) -> dict[int, Scalar]:
+    headers = _headers(ws, header_row)
+    out = {}
+    for name, value in values.items():
+        col = headers.get(name.strip().lower())
+        if col is None:
+            names = [str(c.value) for c in ws[header_row] if c.value is not None]
+            raise ToolError(f"No column named {name!r}. Columns: {names}")
+        out[col] = value
+    return out
+
+
+@mcp.tool()
+def list_rows(
+    sheet: str,
+    where: dict[str, Scalar] | None = None,
+    contains: str | None = None,
+    header_row: int = 1,
+    limit: int = 200,
+) -> dict:
+    """List table rows (e.g. todo items) as records keyed by column header.
+
+    Args:
+        sheet: Sheet name.
+        where: Only rows where these columns equal these values (text compared
+               case-insensitively), e.g. {"Status": "Open"}. Use null to match empty cells.
+        contains: Only rows where any cell contains this text (case-insensitive).
+        header_row: Row number holding the column headers.
+        limit: Maximum rows to return.
+    """
+    def norm(v: Any) -> Any:
+        return v.strip().lower() if isinstance(v, str) else _jsonable(v)
+
+    with _locked():
+        ws = _sheet(_load(data_only=True), sheet)
+        headers = _headers(ws, header_row)
+        names = {col: str(ws.cell(header_row, col).value).strip() for col in headers.values()}
+        wanted = {col: norm(v) for col, v in _columns_for(ws, header_row, where or {}).items()}
+        needle = contains.lower() if contains else None
+        rows, matched = [], 0
+        for r in range(header_row + 1, ws.max_row + 1):
+            record = {name: _jsonable(ws.cell(r, col).value) for col, name in names.items()}
+            if all(v is None for v in record.values()):
+                continue
+            if any(norm(ws.cell(r, col).value) != v for col, v in wanted.items()):
+                continue
+            if needle and not any(needle in str(v).lower() for v in record.values() if v is not None):
+                continue
+            matched += 1
+            if len(rows) < limit:
+                rows.append({"row": r, **record})
+        return {"sheet": sheet, "columns": list(names.values()), "matched": matched, "rows": rows}
+
+
+@mcp.tool()
+def add_row(sheet: str, values: dict[str, Scalar], header_row: int = 1) -> str:
+    """Add one row (e.g. a new todo) after the last non-empty row, giving values by column header.
+
+    Args:
+        sheet: Sheet name.
+        values: Column header -> value, e.g. {"Task": "Buy milk", "Status": "Open"}.
+        header_row: Row number holding the column headers.
+    """
+    if not values:
+        raise ToolError("values is empty")
+    with _locked():
+        wb = _load()
+        ws = _sheet(wb, sheet)
+        cols = _columns_for(ws, header_row, values)
+        row = ws.max_row
+        while row > header_row and all(c.value is None for c in ws[row]):
+            row -= 1
+        row += 1
+        for col, value in cols.items():
+            ws.cell(row, col, value)
+        _save(wb)
+    return f"Added row {row} on {sheet!r}."
+
+
+@mcp.tool()
+def update_row(sheet: str, row: int, values: dict[str, Scalar], header_row: int = 1) -> str:
+    """Change some columns of one existing row, e.g. mark a todo done with {"Status": "Done"}.
+
+    Args:
+        sheet: Sheet name.
+        row: Row number, as returned by list_rows.
+        values: Column header -> new value. Columns not listed are left alone; null clears a cell.
+        header_row: Row number holding the column headers.
+    """
+    if not values:
+        raise ToolError("values is empty")
+    with _locked():
+        wb = _load()
+        ws = _sheet(wb, sheet)
+        if not header_row < row <= ws.max_row:
+            raise ToolError(f"Row {row} is outside the data (rows {header_row + 1}-{ws.max_row})")
+        for col, value in _columns_for(ws, header_row, values).items():
+            ws.cell(row, col, value)
+        _save(wb)
+    return f"Updated row {row} on {sheet!r}."
+
+
 @mcp.tool()
 def add_sheet(name: str) -> str:
     """Create a new empty sheet at the end of the workbook."""
