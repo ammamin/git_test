@@ -34,7 +34,7 @@ python3 -m venv .venv
 ## 2. Run it
 
 ```bash
-export EXCEL_FILE=/srv/data/budget.xlsx
+export EXCEL_FILE=/project/todo.xlsx              # this is also the default
 export MCP_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 export MCP_ALLOWED_HOSTS=excel.example.com     # your public hostname
 echo "Connector URL: https://excel.example.com/$MCP_SECRET/mcp"
@@ -54,7 +54,7 @@ After=network.target
 [Service]
 User=excel
 WorkingDirectory=/opt/git_test/excel-mcp
-Environment=EXCEL_FILE=/srv/data/budget.xlsx
+Environment=EXCEL_FILE=/project/todo.xlsx
 Environment=MCP_SECRET=put-your-long-random-secret-here
 Environment=MCP_ALLOWED_HOSTS=excel.example.com
 ExecStart=/opt/git_test/excel-mcp/.venv/bin/python server.py

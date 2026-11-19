@@ -1,7 +1,7 @@
 """Remote MCP server that lets Claude read and edit one Excel workbook.
 
 Configuration (environment variables):
-  EXCEL_FILE        Path to the .xlsx/.xlsm workbook (required).
+  EXCEL_FILE        Path to the .xlsx/.xlsm workbook (default /project/todo.xlsx).
   MCP_SECRET        Long random string; becomes part of the URL path (required).
   MCP_HOST          Bind address (default 127.0.0.1 - put a TLS reverse proxy in front).
   MCP_PORT          Bind port (default 8000).
@@ -45,7 +45,7 @@ def _env(name: str, default: str | None = None) -> str:
     return value
 
 
-EXCEL_FILE = Path(_env("EXCEL_FILE")).expanduser().resolve()
+EXCEL_FILE = Path(_env("EXCEL_FILE", "/project/todo.xlsx")).expanduser().resolve()
 SECRET = _env("MCP_SECRET")
 HOST = os.environ.get("MCP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MCP_PORT", "8000"))
