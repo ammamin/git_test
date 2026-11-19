@@ -2,14 +2,15 @@
 
 Configuration (environment variables):
   EXCEL_FILE        Path to the .xlsx/.xlsm workbook (default /project/todo.xlsx).
-  MCP_SECRET        Long random string; becomes part of the URL path (required).
+  MCP_PUBLIC_URL    Public HTTPS address of this server, e.g. https://excel.example.com (required).
+  MCP_PASSWORD      Password you type on the sign-in page when connecting Claude (required, 12+ chars).
+  MCP_STATE_FILE    Where OAuth clients/token hashes are stored (default oauth-state.json next to this file).
   MCP_HOST          Bind address (default 127.0.0.1 - put a TLS reverse proxy in front).
   MCP_PORT          Bind port (default 8000).
-  MCP_ALLOWED_HOSTS Comma-separated public hostnames accepted in the Host header
-                    (e.g. "excel.example.com"). Unset = no Host check.
   EXCEL_BACKUPS     How many backups to keep before each edit (default 10, 0 = off).
 
-The connector URL to give Claude is:  https://<your-domain>/<MCP_SECRET>/mcp
+The connector URL to give Claude is:  <MCP_PUBLIC_URL>/mcp
+Access is protected by OAuth; see oauth.py.
 """
 
 from __future__ import annotations
@@ -24,13 +25,19 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
 from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
+from starlette.requests import Request
+from starlette.responses import Response
+
+from oauth import SingleUserOAuthProvider
 
 Scalar = str | int | float | bool | None
 
@@ -46,14 +53,24 @@ def _env(name: str, default: str | None = None) -> str:
 
 
 EXCEL_FILE = Path(_env("EXCEL_FILE", "/project/todo.xlsx")).expanduser().resolve()
-SECRET = _env("MCP_SECRET")
+PUBLIC_URL = _env("MCP_PUBLIC_URL").rstrip("/")
+PASSWORD = _env("MCP_PASSWORD")
+STATE_FILE = Path(os.environ.get("MCP_STATE_FILE", Path(__file__).with_name("oauth-state.json"))).resolve()
 HOST = os.environ.get("MCP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MCP_PORT", "8000"))
-ALLOWED_HOSTS = [h.strip() for h in os.environ.get("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
 BACKUPS = int(os.environ.get("EXCEL_BACKUPS", "10"))
 
-if len(SECRET) < 24 or not SECRET.replace("-", "").replace("_", "").isalnum():
-    sys.exit("MCP_SECRET must be at least 24 characters of letters, digits, '-' or '_'")
+_public = urlparse(PUBLIC_URL)
+_local = _public.hostname in ("localhost", "127.0.0.1")
+if not _public.hostname or _public.path or _public.scheme != ("http" if _local else "https"):
+    sys.exit("MCP_PUBLIC_URL must look like https://excel.example.com (https, no path)")
+if len(PASSWORD) < 12:
+    sys.exit("MCP_PASSWORD must be at least 12 characters")
+RESOURCE_URL = f"{PUBLIC_URL}/mcp"
+
+oauth = SingleUserOAuthProvider(
+    public_url=PUBLIC_URL, resource_url=RESOURCE_URL, password=PASSWORD, state_file=STATE_FILE
+)
 if not EXCEL_FILE.is_file():
     sys.exit(f"EXCEL_FILE does not exist: {EXCEL_FILE}")
 
@@ -64,7 +81,21 @@ mcp = MCPServer(
         "Call workbook_info first to see the sheets and their headers. "
         "Cell references use A1 notation. Strings starting with '=' are written as formulas."
     ),
+    auth_server_provider=oauth,
+    auth=AuthSettings(
+        issuer_url=PUBLIC_URL,
+        resource_server_url=RESOURCE_URL,
+        validate_token_resource=True,
+        client_registration_options=ClientRegistrationOptions(enabled=True),
+        revocation_options=RevocationOptions(enabled=True),
+    ),
 )
+
+
+@mcp.custom_route("/login", methods=["GET", "POST"])
+async def login(request: Request) -> Response:
+    return await oauth.login(request)
+
 
 _thread_lock = threading.Lock()
 
@@ -426,16 +457,17 @@ def add_sheet(name: str) -> str:
 
 
 if __name__ == "__main__":
-    print(f"Serving {EXCEL_FILE} on http://{HOST}:{PORT}/<MCP_SECRET>/mcp", file=sys.stderr)
+    print(f"Serving {EXCEL_FILE} on {HOST}:{PORT}; connector URL: {RESOURCE_URL}", file=sys.stderr)
     mcp.run(
         transport="streamable-http",
         host=HOST,
         port=PORT,
-        streamable_http_path=f"/{SECRET}/mcp",
+        streamable_http_path="/mcp",
         stateless_http=True,
         json_response=True,
         transport_security=TransportSecuritySettings(
-            enable_dns_rebinding_protection=bool(ALLOWED_HOSTS),
-            allowed_hosts=ALLOWED_HOSTS,
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[_public.netloc],
+            allowed_origins=[PUBLIC_URL],
         ),
     )

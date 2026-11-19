@@ -34,10 +34,9 @@ python3 -m venv .venv
 ## 2. Run it
 
 ```bash
+export MCP_PUBLIC_URL=https://excel.example.com   # the public HTTPS address of this server
+export MCP_PASSWORD='a long password only you know'   # 12+ characters
 export EXCEL_FILE=/project/todo.xlsx              # this is also the default
-export MCP_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-export MCP_ALLOWED_HOSTS=excel.example.com     # your public hostname
-echo "Connector URL: https://excel.example.com/$MCP_SECRET/mcp"
 .venv/bin/python server.py
 ```
 
@@ -55,8 +54,8 @@ After=network.target
 User=excel
 WorkingDirectory=/opt/git_test/excel-mcp
 Environment=EXCEL_FILE=/project/todo.xlsx
-Environment=MCP_SECRET=put-your-long-random-secret-here
-Environment=MCP_ALLOWED_HOSTS=excel.example.com
+Environment=MCP_PUBLIC_URL=https://excel.example.com
+Environment=MCP_PASSWORD=a-long-password-only-you-know
 ExecStart=/opt/git_test/excel-mcp/.venv/bin/python server.py
 Restart=on-failure
 
@@ -82,21 +81,31 @@ pointing at `http://127.0.0.1:8000` works too.
 ## 4. Add it to Claude
 
 1. Open **claude.ai** in a browser → **Settings → Connectors → Add custom connector**.
-2. Name it (e.g. "Excel") and paste `https://excel.example.com/<MCP_SECRET>/mcp`.
-3. Leave the OAuth fields empty and save.
+2. Name it (e.g. "Todo") and paste `https://excel.example.com/mcp`. Leave the
+   optional OAuth client ID/secret fields empty - Claude registers itself.
+3. Click **Connect**. Your server's sign-in page opens; type `MCP_PASSWORD` and
+   press **Allow access**.
 4. In the Android app, open a chat, enable the connector from the tools menu and ask
    e.g. "What's still open on my todo list?" or "Add 'buy milk' and mark the rent one done".
 
 Connectors are tied to your account, so once added on the web it shows up in the
 mobile app.
 
-## Security
+## Security (OAuth)
 
-The only thing protecting the file is the secret in the URL plus HTTPS. Treat the
-full URL like a password: anyone who has it can read and change the workbook.
-Rotate it by changing `MCP_SECRET` and re-adding the connector. For something
-stronger, put OAuth in front (the MCP SDK supports it via `token_verifier` /
-`auth_server_provider`).
+The server is its own OAuth 2.1 authorization server (`oauth.py`), for one user:
+
+- `/mcp` rejects every request without a valid access token.
+- Claude gets a token only after you enter `MCP_PASSWORD` on the sign-in page
+  (authorization code flow with PKCE, dynamic client registration).
+- Access tokens last 1 hour; refresh tokens rotate on every use and expire after
+  90 days without use, after which you sign in again.
+- Only token hashes are stored, in `oauth-state.json` (mode 0600, path changeable
+  with `MCP_STATE_FILE`). Delete that file and restart to disconnect everything.
+- Five wrong passwords lock the sign-in page for 15 minutes. The lock is global,
+  so someone hammering the page can also delay *your* sign-in; already-connected
+  Claude sessions are not affected.
+- Changing `MCP_PASSWORD` does not revoke existing tokens - delete the state file too.
 
 ## Limitations
 
